@@ -1,0 +1,270 @@
+---
+title: "Analysis of Riipen's New Feature"
+author: "Shannon Simo Komguem, Kai Wang Pong, Eng Sung and JiaQi Zhao"
+subtitle: STA130 TUT0112-Group 112-1
+output:
+  beamer_presentation: default
+  ioslides_presentation: default
+  widescreen: yes
+---
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# echo=FALSE will stop the code chunk from appearing in the knit document
+# warning=FALSE and message=FALSE will stop R messages from appearing in the knit document
+library(tidyverse)
+library(lubridate)
+library(readxl)
+
+# This code chunk will run but not appear in the knit document
+# Here is a sample showing you how to read in the data
+requests <- read_csv("requests_Mar18_2019.csv")
+categories <- read_csv("categories.csv")
+courses <- read_csv("courses.csv")
+educatoraccounts <- read_csv("educatoraccounts.csv")
+employeraccounts <- read_csv("employeraccounts.csv")
+projects <- read_csv("projects.csv")
+studentaccounts <- read_csv("studentaccounts.csv")
+teams <- read_csv("teams.csv")
+
+# MUTATE THE DATA TO GIVE DATES
+#REMOVE AUG 30
+requests <- requests[complete.cases(requests$'Actor Id'),]
+
+# changes the column names of requests
+names(requests) <- c("id", "recipient_id", "actor_id", "requestable", "day_created", "day_uploaded", "day_expired", "state")
+
+# converts "12 April, 2018" to "2018-04-12" using lubricate library
+requests <- requests %>% mutate(day_created2 = dmy(day_created)-11) 
+
+# new varaible with just months
+requests <- requests %>% mutate(month_created = month(day_created2))
+
+# month and year
+requests <- requests %>% mutate(month_year = format(as.Date(requests$day_created2), "%Y-%m"))
+requests <- requests %>% 
+  mutate(month_interval = case_when(month_created == 4 ~ 1, 
+                                    month_created == 5 ~ 2,
+                                    month_created == 6 ~ 3,
+                                    month_created == 7 ~ 4, 
+                                    month_created == 8 ~ 5,
+                                    month_created == 9 ~ 6,
+                                    month_created == 10 ~ 7, 
+                                    month_created == 11 ~ 8,
+                                    month_created == 12 ~ 9,
+                                    month_created == 1 ~ 10, 
+                                    month_created == 2 ~ 11,
+                                    month_created == 3 ~ 12)) 
+
+# glimpse(requests)
+
+
+# MUTATE THE DATA TO GIVE USER TYPE (SHANNON'S PART)
+# Read all student, educator, and employer IDs
+student_ids <- studentaccounts$Id
+educator_ids <- educatoraccounts$Id
+employer_ids <- employeraccounts$Id
+
+# Mutate requests to record which type of user created the request
+requests <- mutate(requests, sender_type = ifelse(is.element(actor_id, student_ids), "student", ifelse(is.element(actor_id, educator_ids), "educator", ifelse(is.element(actor_id, employer_ids), "employer", "other"))))
+
+# Mutate requests to record which type of user received the request
+requests <- mutate(requests, recipient_type = ifelse(is.element(recipient_id, student_ids), "student", ifelse(is.element(recipient_id, educator_ids), "educator", ifelse(is.element(recipient_id, employer_ids), "employer", "other"))))
+```
+
+# About the data
+\fontsize{15}{18}
+
+- Riipen is an education technology company. On November 21, 2018, Riipen launched a "request expiry" feature which requires users to respond to requests within 14 days, or they will expire.
+
+# The Data
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+options(width = 50)
+library(tidyverse)
+original_data <- read_csv("requests_Mar18_2019.csv")
+glimpse(original_data)
+```
+
+# Objective
+\fontsize{15}{18}
+
+- How did the November 21 launch of request expiry change user behaviour?
+
+# Data Cleaning
+\fontsize{15}{18}
+- We excluded August 30th, 2018 due to data migration problems.  
+
+# Statistical Assessments 
+\fontsize{15}{18}
+
+- Volume of Request
+- Response Time
+- Regression Model: Response Time and Acceptance Rate
+
+# Volume of Request
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(data = requests, aes(x = month_interval)) + geom_bar()
+
+#This is a bar graph of the number of volume per time interval. Each interval starts on the 12th day of each month and ends on the 11th day of the next month. Using such interval was necessary because it accounted for incomplete data for April 2018 and March 2019. Our findings showed that after April, as the time interval increases, the volume of requests increased as well.
+```
+
+# Volume of Request By User Type
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(data = requests, aes(x = month_interval)) + geom_bar() + facet_wrap(~ sender_type)
+#Furthermore, we split the bar graph by user type, we see that for educators, the number of requests increases as time goes on. In addition, we also see that employer has the same trend after April.
+```
+
+# Respone Time - Data Cleaning
+\fontsize{15}{18}
+
+* Aug 30
+* Pending cases
+* Cancelled cases
+* Expired cases
+* Response Time (in days) = difference of “day of updated” and “day of created”
+
+# Respone Time
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+#MAKE NEW VARIABLE: day_created2(actual date created), day_updated, created_before_Nov21, response_time before_or_after
+  
+requests <- requests %>%
+  mutate(day_created3 = dmy(day_created)) %>%
+  mutate(day_updated = dmy(day_uploaded)) %>%
+  mutate(response_time = (day_updated - day_created3)) %>%
+  mutate(created_before_Nov21 = day_created3 < "2018-11-21") 
+
+requests <- requests %>%
+  mutate(before_or_after = case_when(created_before_Nov21 == TRUE ~ "before Nov21",
+                                     created_before_Nov21 == FALSE ~ "after Nov21"))
+
+# REQUESTS WITH RESPONSE
+responsed_requests <- filter(requests, state == "accepted" | state == "rejected" )
+responsed_requests
+```
+
+
+# Comparison Mean Response Time Before And After Nov21
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+# GRAPH BEFORE_AFTER_NOV21 (EXCLUDING AUG30)
+responsed_requests2 <- responsed_requests %>%
+  filter(!is.na(response_time), !is.na(month_year), day_updated != "2018-08-30") %>%
+  group_by(before_or_after) %>%
+  summarize(average = mean(response_time))
+
+responsed_requests2 %>%
+  ggplot(aes(x = before_or_after, y = average)) + geom_col()
+
+```
+
+# Mean Response Time Every 30 Days
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+# GRAPH 30 DAYS (EXLCUDING AUG30)
+
+responsed_requests %>%
+  filter(!is.na(response_time), !is.na(month_year), day_updated != "2018-08-30") %>%
+  group_by(month_year) %>%
+  summarize(average = mean(response_time)) %>%
+  ggplot(aes(x = month_year, y = average)) + geom_col()
+
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+requests<-read.csv("requests_Mar18_2019.csv")
+Request_dmy<-requests%>%
+  mutate(day_created=dmy(Day.of.Created.At))%>%
+  mutate(day_updated=dmy(Day.of.Updated.At))%>%
+  mutate(day_expired=dmy(Day.of.Expired.At))
+New_request<-Request_dmy%>%
+  select(Id,State,day_created, day_updated, day_expired)%>%
+  mutate(Response_time = as.numeric(difftime(day_updated, day_created, units = "days")))
+New_request<-New_request%>%filter(day_created != "2018-08-30")
+
+reA<-summarise(group_by(New_request, Response_time), total = n())
+reB<-New_request%>%
+  filter(State == 'accepted')%>%
+  group_by(Response_time)%>%summarise(accepted=n())
+reC<-New_request%>%
+  filter(State == 'expired')%>%
+  group_by(Response_time)%>%summarise(expired=n())
+reD<-New_request%>%
+  filter(State == 'rejected')%>%
+  group_by(Response_time)%>%summarise(rejected=n())
+reE<-New_request%>%
+  filter(State == 'cancelled')%>%
+  group_by(Response_time)%>%summarise(cancelled=n())
+reF<-New_request%>%
+  filter(State == 'pending')%>%
+  group_by(Response_time)%>%summarise(pending=n())
+
+GroupA<-full_join(x = reA, y = reB, by = "Response_time")
+GroupB<-full_join(x = GroupA, y = reC, by = "Response_time")
+GroupC<-full_join(x = GroupB, y = reD, by = "Response_time")
+GroupD<-full_join(x = GroupC, y = reE, by = "Response_time")
+GroupE<-full_join(x = GroupD, y = reF, by = "Response_time")
+
+GroupE[is.na(GroupE)] <- 0
+
+Accept_rate<-GroupE%>%mutate(acceptance_rate = accepted / (total-pending-cancelled-expired) * 100)
+Accept_rate[is.na(Accept_rate)] <- 0
+mod_rate <- lm(acceptance_rate ~ Response_time, data = Accept_rate)
+```
+
+# Regression Model
+
+## Relation between Response time and Acceptance -- New Variables
+\fontsize{15}{18}
+
+* Acceptance rate = Accepted requests / (Accepted requests + Rejected request) * 100
+
+# Relation between Response time and Acceptance -- New Data
+```{r echo=FALSE, fig.width=5, message=FALSE, warning=FALSE}
+glimpse(Accept_rate)
+```
+
+# Relation between Response time and Acceptance -- Regression model
+\fontsize{15}{18}
+$$\hat{y}_{i}=67.77 -0.41x_{i}$$
+
+# Relation between Response time and Acceptance -- Regression Graph
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3, fig.width=5}
+Accept_rate %>% 
+  ggplot(aes(x=Response_time, y=acceptance_rate))+ geom_point()+geom_smooth(method="lm", se=TRUE) + theme_minimal() + labs(x = "Response Time (days)", y = "Acceptance Rate")
+```
+```{r,echo=FALSE, message=FALSE, warning=FALSE, eval=FALSE}
+summary(mod_rate)$coefficients
+```
+
+# Relation between Response time and Acceptance -- Data Summary
+\fontsize{15}{18}
+* p-value for constant = 6.26^-24
+* p-value for response time = 4.74^-10
+
+
+# Relation between Response time and Acceptance -- Correlation
+\fontsize{15}{18}
+* Correlation coefficient = -0.5634846
+* Negative relationship
+* Moderate relationship
+
+# Results
+\fontsize{15}{18}
+- Volume of request increased over time
+- Mean response time decreased
+- Regression model: negative relationship between response time and acceptance rate
+
+# Conclusion
+\fontsize{15}{18}
+- Effect? Yes
+- Respond quicker
+- More requests
+
+# Limitations, Challenges and Error
+\fontsize{15}{18}
+- Data on Aug 30 2018
+- Cannot conclude causation
+- Challenge: cleaning the data
